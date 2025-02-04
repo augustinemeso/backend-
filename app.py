@@ -1,34 +1,50 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-from jwt import encode, decode 
+from jwt import encode, decode, ExpiredSignatureError, InvalidTokenError
 import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask_migrate import Migrate 
-import flask_cors import CORS
-import OS 
+from flask_migrate import Migrate
+import os
 from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Check for required environment variables and log errors if any are missing
+required_env_vars = ['DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT', 'DB_NAME', 'SECRET_KEY']
+missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+
+if missing_vars:
+    raise ValueError(f"Missing environment variables: {', '.join(missing_vars)}")
 
 app = Flask(__name__)
 
-app.config['SQLALCHEMY_DATABASE_URI'] = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
+# Use environment variables for the database connection
+db_user = os.getenv('DB_USER')
+db_password = os.getenv('DB_PASSWORD')
+db_host = os.getenv('DB_HOST')
+db_port = os.getenv('DB_PORT')
+db_name = os.getenv('DB_NAME')
 
-# Set up database URI for SQLAlchemy
-app.config['SQLALCHEMY_DATABASE_URI'] = f"postgresql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
+# Print out the values for debugging
+print(f"DB_USER: {db_user}")
+print(f"DB_PASSWORD: {db_password}")
+print(f"DB_HOST: {db_host}")
+print(f"DB_PORT: {db_port}")
+print(f"DB_NAME: {db_name}")
+
+app.config['SQLALCHEMY_DATABASE_URI'] = (
+    f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-
 db = SQLAlchemy(app)
-
 migrate = Migrate(app, db)
 CORS(app)  # Enable CORS for frontend-backend communication
 
-# Configure SQLite database
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///todos.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
 # Secret key for JWT
-app.config['SECRET_KEY'] = 'your-secret-key'
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
 
 # User model
 class User(db.Model):
@@ -64,7 +80,7 @@ def register():
     if User.query.filter_by(username=username).first():
         return jsonify({'message': 'Username already exists'}), 400
 
-    # Hash the password before storing it with pbkdf2:sha256
+    # Hash the password before storing it
     hashed_password = generate_password_hash(password, method='pbkdf2:sha256')
     new_user = User(username=username, password=hashed_password)
     db.session.add(new_user)
@@ -82,19 +98,16 @@ def login():
     user = User.query.filter_by(username=username).first()
 
     if user and check_password_hash(user.password, password):
-        # Create JWT token using timezone-aware datetime
+        # Create JWT token
         token = encode({
             'user_id': user.id,
-            'exp': datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=30)
-        }, str(app.config['SECRET_KEY']), algorithm='HS256')
-        
-        # Convert bytes to string if needed
-        if isinstance(token, bytes):
-            token = token.decode('utf-8')
-            
-        return jsonify({'token': token})
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=30)
+        }, app.config['SECRET_KEY'], algorithm='HS256')
+
+    return jsonify({'token': token, 'message': 'logged in successfully'})
 
     return jsonify({'message': 'Invalid credentials'}), 401
+
 # Helper function to verify token
 def verify_token():
     token = request.headers.get('Authorization')
@@ -103,17 +116,15 @@ def verify_token():
         return jsonify({'message': 'Token is missing'}), 401
 
     try:
-        data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
-        user = User.query.get(data['user_id'])  # Fetch user using user_id
+        data = decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        user = User.query.get(data['user_id'])
 
         if not user:
             return jsonify({'message': 'User not found'}), 404
 
         return user
-    except jwt.ExpiredSignatureError:
-        return jsonify({'message': 'Token has expired'}), 401
-    except jwt.InvalidTokenError:
-        return jsonify({'message': 'Invalid token'}), 401
+    except (ExpiredSignatureError, InvalidTokenError):
+        return jsonify({'message': 'Invalid or expired token'}), 401
 
 # Protected route to get todos
 @app.route('/todos', methods=['GET'])
@@ -140,7 +151,7 @@ def add_todo():
     db.session.add(new_todo)
     db.session.commit()
 
-    return jsonify({'message': 'Todo added successfully'})
+    return jsonify({'message': 'Todo added successfully'}), 201
 
 if __name__ == '__main__':
     app.run(debug=True)
