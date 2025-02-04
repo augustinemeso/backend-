@@ -5,16 +5,13 @@ from jwt import encode, decode
 import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_migrate import Migrate 
+import flask_cors import CORS
+import OS 
+from dotenv import load_dotenv
 
 app = Flask(__name__)
 
-DB_CONFIG = {
-    "database": "postgres",
-    "user": "postgres.utllxzyxclyzpbttrpgn",
-    "password": "T50agGKffDlt190J",
-    "host": "aws-0-ap-south-1.pooler.supabase.com",
-    "port": 5432
-}
+app.config['SQLALCHEMY_DATABASE_URI'] = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
 
 # Set up database URI for SQLAlchemy
 app.config['SQLALCHEMY_DATABASE_URI'] = f"postgresql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
